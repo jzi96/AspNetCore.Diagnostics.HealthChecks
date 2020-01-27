@@ -53,18 +53,24 @@ namespace Microsoft.Extensions.DependencyInjection
 
             services.AddDbContext<HealthChecksDb>(db =>
             {
-                var connectionString = healthCheckSettings.HealthCheckDatabaseConnectionString;
-                if (string.IsNullOrWhiteSpace(connectionString))
+                string type = healthCheckSettings.HealthCheckStatusDbType?.ToLowerInvariant();
+                switch (type)
                 {
-                    var contentRoot = configuration[HostDefaults.ContentRootKey];
-                    var path = Path.Combine(contentRoot, databaseName);
-                    connectionString = $"Data Source={path}";
+                    case "sqlserver":
+                        db.UseSqlServer(GetSqlServerConnectionString(healthCheckSettings),opt=>
+                        {
+                            opt.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromMilliseconds(150), errorNumbersToAdd: null);
+                        });
+                        break;
+                    case "inmemory":
+                        //Does not work, not relational
+                        db.UseInMemoryDatabase(GetInMemoryConnectionString(healthCheckSettings));
+                        break;
+                    case "sqlite":
+                    default:
+                        db.UseSqlite(GetSqliteConnectionString(databaseName, configuration, healthCheckSettings));
+                        break;
                 }
-                else
-                {
-                    connectionString = Environment.ExpandEnvironmentVariables(connectionString);
-                }
-                db.UseSqlite(connectionString);
             });
 
             if (kubernetesDiscoverySettings.Enabled)
@@ -83,7 +89,50 @@ namespace Microsoft.Extensions.DependencyInjection
 
             return services;
         }
+        private static string GetSqlServerConnectionString(Settings healthCheckSettings)
+        {
+            var connectionString = healthCheckSettings.HealthCheckDatabaseConnectionString;
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new Exception("There is no connection string defined for UI. For Sql Server, you have to specify a connection string 'HealthChecksUI:HealthCheckDatabaseConnectionString'");
+            }
+            else
+            {
+                connectionString = Environment.ExpandEnvironmentVariables(connectionString);
+            }
 
+            return connectionString;
+        }
+        private static string GetSqliteConnectionString(string databaseName, IConfiguration configuration, Settings healthCheckSettings)
+        {
+            var connectionString = healthCheckSettings.HealthCheckDatabaseConnectionString;
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                var contentRoot = configuration[HostDefaults.ContentRootKey];
+                var path = Path.Combine(contentRoot, databaseName);
+                connectionString = $"Data Source={path}";
+            }
+            else
+            {
+                connectionString = Environment.ExpandEnvironmentVariables(connectionString);
+            }
+
+            return connectionString;
+        }
+        private static string GetInMemoryConnectionString(Settings healthCheckSettings)
+        {
+            var connectionString = healthCheckSettings.HealthCheckDatabaseConnectionString;
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                connectionString = AppDomain.CurrentDomain.FriendlyName;
+            }
+            else
+            {
+                connectionString = Environment.ExpandEnvironmentVariables(connectionString);
+            }
+
+            return connectionString;
+        }
         public static IServiceCollection AddApiEndpointHttpClient(this IServiceCollection services)
         {
             return services.AddHttpClient(Keys.HEALTH_CHECK_HTTP_CLIENT_NAME, (sp, client) =>
@@ -129,8 +178,8 @@ namespace Microsoft.Extensions.DependencyInjection
                 var settings = scope.ServiceProvider
                     .GetService<IOptions<Settings>>();
 
-                await db.Database.EnsureDeletedAsync();
-                await db.Database.MigrateAsync();
+                await db.Database.EnsureCreatedAsync();
+                //await db.Database.MigrateAsync();
 
                 var healthCheckConfigurations = settings.Value?
                     .HealthChecks?

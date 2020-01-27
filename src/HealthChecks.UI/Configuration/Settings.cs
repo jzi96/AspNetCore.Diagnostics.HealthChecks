@@ -11,6 +11,8 @@ namespace HealthChecks.UI.Configuration
         internal int EvaluationTimeInSeconds { get; set; } = 10;
         internal int MinimumSecondsBetweenFailureNotifications { get; set; } = 60 * 10;
         internal string HealthCheckDatabaseConnectionString { get; set; }
+        internal string HealthCheckStatusDbType { get; set; } = "Sqlite";
+
         internal Func<IServiceProvider, HttpMessageHandler> ApiEndpointHttpHandler { get; private set; }
         internal Action<IServiceProvider, HttpClient> ApiEndpointHttpClientConfig { get; private set; }
         internal Func<IServiceProvider, HttpMessageHandler> WebHooksEndpointHttpHandler { get; private set; }
